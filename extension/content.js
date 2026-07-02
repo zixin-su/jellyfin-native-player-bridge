@@ -4,6 +4,7 @@
   const browserApi = globalThis.browser || globalThis.chrome;
   const PLAY_TEXT_RE = /(播放|继续播放|play|resume|watch now|watch)/i;
   const PLAY_CLASS_RE = /(^|[-_\s])(btnplay|btnresume|play|resume|cardoverlaybutton)([-_\s]|$)/i;
+  const NON_PLAY_ACTION_RE = /(favorite|favourite|heart|like|unlike|played|watched|markplayed|markwatched|markunwatched|userdata|user-data|more|menu|ellipsis|shuffle|trailer|info|detail|收藏|取消收藏|已播放|未播放|看过|更多|菜单|随机|预告|详情|信息)/i;
   const UUIDISH_RE = /^[a-f0-9]{8,32}$/i;
   const JELLYFIN_HINT_RE = /(jellyfin|emby|mediabrowser)/i;
   const CARD_SELECTOR = ".card, .cardBox, .cardScalable, .portraitCard, .squareCard, .backdropCard, .listItem, [data-id], [data-itemid], [data-item-id]";
@@ -176,21 +177,19 @@
   }
 
   function getElementText(element) {
-    const pieces = [];
-    let current = element;
-    let depth = 0;
-    while (current && current !== document.documentElement && depth < 3) {
-      pieces.push(
-        current.getAttribute("aria-label") || "",
-        current.getAttribute("title") || "",
-        current.getAttribute("data-action") || "",
-        current.getAttribute("data-command") || "",
-        current.getAttribute("class") || "",
-        current.textContent || ""
-      );
-      current = current.parentElement;
-      depth += 1;
-    }
+    const dataset = element.dataset || {};
+    const pieces = [
+      element.getAttribute("aria-label") || "",
+      element.getAttribute("title") || "",
+      element.getAttribute("data-action") || "",
+      element.getAttribute("data-command") || "",
+      element.getAttribute("data-icon") || "",
+      element.getAttribute("class") || "",
+      dataset.action || "",
+      dataset.command || "",
+      dataset.icon || "",
+      element.textContent || ""
+    ];
     return pieces.join(" ").slice(0, 1000);
   }
 
@@ -216,7 +215,7 @@
     }
 
     const text = getElementText(target);
-    if (/shuffle|trailer|预告|随机|菜单|more/i.test(text)) {
+    if (NON_PLAY_ACTION_RE.test(text)) {
       return false;
     }
 
