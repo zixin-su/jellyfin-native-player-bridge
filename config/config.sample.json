@@ -13,7 +13,7 @@
   "jellyfin": {
     "chooseFirstPlayableForFolders": true,
     "requestPlaybackInfo": true,
-    "reportPlaybackStart": false,
+    "reportPlaybackStart": true,
     "apiTimeoutMs": 12000
   },
   "logging": {

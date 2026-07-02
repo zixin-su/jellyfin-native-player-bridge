@@ -116,7 +116,7 @@ function Write-ConfigFiles {
     jellyfin = [ordered]@{
       chooseFirstPlayableForFolders = $true
       requestPlaybackInfo = $true
-      reportPlaybackStart = $false
+      reportPlaybackStart = $true
       apiTimeoutMs = 12000
     }
     logging = [ordered]@{

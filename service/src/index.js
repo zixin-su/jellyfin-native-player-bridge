@@ -26,7 +26,7 @@ const DEFAULT_CONFIG = {
   jellyfin: {
     chooseFirstPlayableForFolders: true,
     requestPlaybackInfo: true,
-    reportPlaybackStart: false,
+    reportPlaybackStart: true,
     apiTimeoutMs: 12000
   },
   logging: {
@@ -668,21 +668,39 @@ function launchPlayer(streamUrl, launchContext) {
   };
 }
 
-async function reportPlaybackStart(context, item, mediaSource, playbackInfo) {
+async function reportPlaybackStart(context, item, mediaSource, playbackInfo, startPositionTicks) {
   if (!config.jellyfin.reportPlaybackStart) {
     return;
+  }
+
+  const body = {
+    ItemId: item.Id,
+    MediaSourceId: mediaSource?.Id,
+    PlaySessionId: playbackInfo?.PlaySessionId,
+    PositionTicks: Number(startPositionTicks) || 0,
+    CanSeek: true,
+    IsPaused: false,
+    IsMuted: false,
+    PlayMethod: "DirectStream",
+    QueueableMediaTypes: ["Video"]
+  };
+  for (const [key, value] of Object.entries(body)) {
+    if (value === undefined || value === null || value === "") {
+      delete body[key];
+    }
   }
 
   try {
     await jellyfinFetch(context, "/Sessions/Playing", {
       method: "POST",
-      body: {
-        ItemId: item.Id,
-        MediaSourceId: mediaSource?.Id,
-        PlaySessionId: playbackInfo?.PlaySessionId,
-        CanSeek: true,
-        EventName: "timeupdate"
-      }
+      body
+    });
+    logger.info("Reported Jellyfin playback start", {
+      itemId: item.Id,
+      itemName: item.Name,
+      mediaSourceId: mediaSource?.Id,
+      playSessionId: playbackInfo?.PlaySessionId,
+      positionTicks: body.PositionTicks
     });
   } catch (error) {
     logger.warn("Failed to report playback start", {
@@ -734,7 +752,7 @@ async function handlePlay(payload) {
     mediaSourceId: mediaSource.Id || ""
   });
 
-  await reportPlaybackStart(context, resolved.playableItem, mediaSource, playbackInfo);
+  await reportPlaybackStart(context, resolved.playableItem, mediaSource, playbackInfo, context.startPositionTicks);
 
   logger.info("Playback handed to local player", {
     requestedItemId: resolved.requestedItem.Id,
