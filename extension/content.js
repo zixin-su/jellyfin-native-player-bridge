@@ -2,8 +2,8 @@
 
 (() => {
   const browserApi = globalThis.browser || globalThis.chrome;
-  const PLAY_TEXT_RE = /(播放|继续播放|play|resume|watch now|watch)/i;
-  const PLAY_CLASS_RE = /(^|[-_\s])(btnplay|btnresume|play|resume|cardoverlaybutton)([-_\s]|$)/i;
+  const PLAY_TEXT_RE = /(^|[\s:：-])(播放|继续播放|play|resume|watch now|watch)([\s:：-]|$)/i;
+  const PLAY_CLASS_RE = /(^|[-_\s])(btnplay|btnresume)([-_\s]|$)/i;
   const PLAY_ICON_RE = /(^|[\s_-])(play_arrow|play_circle|playcircle|play-button|playbutton)([\s_-]|$)/i;
   const NON_PLAY_ACTION_RE = /(favorite|favourite|favorite_border|heart|heart_broken|like|unlike|played|watched|markplayed|markwatched|markunwatched|userdata|user-data|more|more_vert|menu|ellipsis|check|done|task_alt|shuffle|trailer|info|detail|收藏|取消收藏|已播放|未播放|看过|更多|菜单|随机|预告|详情|信息)/i;
   const UUIDISH_RE = /^[a-f0-9]{8,32}$/i;
@@ -185,7 +185,6 @@
       element.getAttribute("data-action") || "",
       element.getAttribute("data-command") || "",
       element.getAttribute("data-icon") || "",
-      element.getAttribute("class") || "",
       dataset.action || "",
       dataset.command || "",
       dataset.icon || "",
@@ -195,8 +194,24 @@
   }
 
   function getIconText(element) {
-    const icon = element.querySelector?.(".material-icons, .material-symbols-outlined, .material-symbols-rounded, i") || null;
-    return String(icon?.textContent || "").trim();
+    const icon =
+      element.matches?.(".material-icons, .material-symbols-outlined, .material-symbols-rounded, i, svg, use")
+        ? element
+        : element.querySelector?.(".material-icons, .material-symbols-outlined, .material-symbols-rounded, i, svg, use") || null;
+    if (!icon) {
+      return "";
+    }
+
+    const pieces = [
+      icon.textContent || "",
+      icon.getAttribute?.("aria-label") || "",
+      icon.getAttribute?.("title") || "",
+      icon.getAttribute?.("data-icon") || "",
+      icon.getAttribute?.("class") || "",
+      icon.getAttribute?.("href") || "",
+      icon.getAttribute?.("xlink:href") || ""
+    ];
+    return pieces.join(" ").trim();
   }
 
   function isPlayElement(element) {
@@ -227,12 +242,13 @@
       return false;
     }
 
+    const classText = target.getAttribute("class") || "";
     const text = `${getElementText(target)} ${iconText}`;
-    if (NON_PLAY_ACTION_RE.test(text)) {
+    if (NON_PLAY_ACTION_RE.test(`${text} ${classText}`)) {
       return false;
     }
 
-    return PLAY_TEXT_RE.test(text) || PLAY_CLASS_RE.test(text) || PLAY_ICON_RE.test(text);
+    return PLAY_TEXT_RE.test(text) || PLAY_CLASS_RE.test(classText) || PLAY_ICON_RE.test(`${text} ${classText}`);
   }
 
   function readJson(value) {
