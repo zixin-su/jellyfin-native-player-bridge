@@ -27,6 +27,8 @@ const DEFAULT_CONFIG = {
     chooseFirstPlayableForFolders: true,
     requestPlaybackInfo: true,
     reportPlaybackStart: true,
+    reportPlaybackStopOnLaunch: true,
+    playbackStopDelaySeconds: 5,
     apiTimeoutMs: 12000
   },
   logging: {
@@ -140,6 +142,7 @@ function normalizeConfig(rawConfig) {
   merged.logging.cleanupIntervalHours = Math.max(1, Number(merged.logging.cleanupIntervalHours) || 12);
   merged.logging.directory = resolveAppPath(merged.logging.directory || "logs");
   merged.jellyfin.apiTimeoutMs = Math.max(1000, Number(merged.jellyfin.apiTimeoutMs) || 12000);
+  merged.jellyfin.playbackStopDelaySeconds = Math.max(0, Number(merged.jellyfin.playbackStopDelaySeconds) || 0);
   merged.stream.maxStreamingBitrate = Number(merged.stream.maxStreamingBitrate) || 140000000;
   return merged;
 }
@@ -668,16 +671,12 @@ function launchPlayer(streamUrl, launchContext) {
   };
 }
 
-async function reportPlaybackStart(context, item, mediaSource, playbackInfo, startPositionTicks) {
-  if (!config.jellyfin.reportPlaybackStart) {
-    return;
-  }
-
+function buildPlaybackReportBody(item, mediaSource, playbackInfo, positionTicks) {
   const body = {
     ItemId: item.Id,
     MediaSourceId: mediaSource?.Id,
     PlaySessionId: playbackInfo?.PlaySessionId,
-    PositionTicks: Number(startPositionTicks) || 0,
+    PositionTicks: Number(positionTicks) || 0,
     CanSeek: true,
     IsPaused: false,
     IsMuted: false,
@@ -689,6 +688,15 @@ async function reportPlaybackStart(context, item, mediaSource, playbackInfo, sta
       delete body[key];
     }
   }
+  return body;
+}
+
+async function reportPlaybackStart(context, item, mediaSource, playbackInfo, startPositionTicks) {
+  if (!config.jellyfin.reportPlaybackStart) {
+    return;
+  }
+
+  const body = buildPlaybackReportBody(item, mediaSource, playbackInfo, startPositionTicks);
 
   try {
     await jellyfinFetch(context, "/Sessions/Playing", {
@@ -708,6 +716,42 @@ async function reportPlaybackStart(context, item, mediaSource, playbackInfo, sta
       error: error.message
     });
   }
+}
+
+async function reportPlaybackStopped(context, item, mediaSource, playbackInfo, positionTicks) {
+  const body = buildPlaybackReportBody(item, mediaSource, playbackInfo, positionTicks);
+
+  try {
+    await jellyfinFetch(context, "/Sessions/Playing/Stopped", {
+      method: "POST",
+      body
+    });
+    logger.info("Reported Jellyfin playback stopped for history", {
+      itemId: item.Id,
+      itemName: item.Name,
+      mediaSourceId: mediaSource?.Id,
+      playSessionId: playbackInfo?.PlaySessionId,
+      positionTicks: body.PositionTicks
+    });
+  } catch (error) {
+    logger.warn("Failed to report playback stopped", {
+      itemId: item.Id,
+      error: error.message
+    });
+  }
+}
+
+function schedulePlaybackStoppedReport(context, item, mediaSource, playbackInfo, startPositionTicks) {
+  if (!config.jellyfin.reportPlaybackStopOnLaunch) {
+    return;
+  }
+
+  const delaySeconds = Math.max(0, Number(config.jellyfin.playbackStopDelaySeconds) || 0);
+  const positionTicks = Math.max(Number(startPositionTicks) || 0, 10_000_000);
+  const timer = setTimeout(() => {
+    reportPlaybackStopped(context, item, mediaSource, playbackInfo, positionTicks);
+  }, delaySeconds * 1000);
+  timer.unref();
 }
 
 function validatePlayPayload(payload) {
@@ -753,6 +797,7 @@ async function handlePlay(payload) {
   });
 
   await reportPlaybackStart(context, resolved.playableItem, mediaSource, playbackInfo, context.startPositionTicks);
+  schedulePlaybackStoppedReport(context, resolved.playableItem, mediaSource, playbackInfo, context.startPositionTicks);
 
   logger.info("Playback handed to local player", {
     requestedItemId: resolved.requestedItem.Id,

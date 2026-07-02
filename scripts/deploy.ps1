@@ -117,6 +117,8 @@ function Write-ConfigFiles {
       chooseFirstPlayableForFolders = $true
       requestPlaybackInfo = $true
       reportPlaybackStart = $true
+      reportPlaybackStopOnLaunch = $true
+      playbackStopDelaySeconds = 5
       apiTimeoutMs = 12000
     }
     logging = [ordered]@{

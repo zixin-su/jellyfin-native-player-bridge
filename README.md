@@ -53,7 +53,9 @@ Tampermonkey 用户脚本方案见 [docs/tampermonkey-userscript.md](docs/tamper
 - `browserSecret`: 浏览器扩展访问本地服务的密钥，部署时自动生成。
 - `playerPath`: 本地播放器 exe 路径。
 - `playerArgs`: 播放器参数模板，默认 `["{url}"]`。
-- `jellyfin.reportPlaybackStart`: 成功调起本地播放器后向 Jellyfin 上报“开始播放”，默认开启；不持续同步进度。
+- `jellyfin.reportPlaybackStart`: 成功调起本地播放器后向 Jellyfin 上报“开始播放”，默认开启。
+- `jellyfin.reportPlaybackStopOnLaunch`: 启动外部播放器后延迟发送一次停止事件，让 Jellyfin 写入播放历史，默认开启。
+- `jellyfin.playbackStopDelaySeconds`: 停止事件延迟秒数，默认 `5`。
 - `logging.retentionDays`: 日志保留天数。
 - `logging.cleanupIntervalHours`: 定时清理日志的间隔。
 
@@ -100,5 +102,6 @@ Tampermonkey 用户脚本方案见 [docs/tampermonkey-userscript.md](docs/tamper
 4. 拼出 Jellyfin `/Videos/{itemId}/stream` 播放地址。
 5. 调起本地播放器。
 6. 向 Jellyfin 上报“开始播放”事件。
+7. 延迟发送一次“停止播放”事件，用于生成 Jellyfin 播放历史；不持续同步真实进度。
 
 普通详情页导航不会被阻止；只有识别为播放/继续播放的动作会被接管。
