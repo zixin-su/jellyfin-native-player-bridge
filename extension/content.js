@@ -4,7 +4,8 @@
   const browserApi = globalThis.browser || globalThis.chrome;
   const PLAY_TEXT_RE = /(播放|继续播放|play|resume|watch now|watch)/i;
   const PLAY_CLASS_RE = /(^|[-_\s])(btnplay|btnresume|play|resume|cardoverlaybutton)([-_\s]|$)/i;
-  const NON_PLAY_ACTION_RE = /(favorite|favourite|heart|like|unlike|played|watched|markplayed|markwatched|markunwatched|userdata|user-data|more|menu|ellipsis|shuffle|trailer|info|detail|收藏|取消收藏|已播放|未播放|看过|更多|菜单|随机|预告|详情|信息)/i;
+  const PLAY_ICON_RE = /(^|[\s_-])(play_arrow|play_circle|playcircle|play-button|playbutton)([\s_-]|$)/i;
+  const NON_PLAY_ACTION_RE = /(favorite|favourite|favorite_border|heart|heart_broken|like|unlike|played|watched|markplayed|markwatched|markunwatched|userdata|user-data|more|more_vert|menu|ellipsis|check|done|task_alt|shuffle|trailer|info|detail|收藏|取消收藏|已播放|未播放|看过|更多|菜单|随机|预告|详情|信息)/i;
   const UUIDISH_RE = /^[a-f0-9]{8,32}$/i;
   const JELLYFIN_HINT_RE = /(jellyfin|emby|mediabrowser)/i;
   const CARD_SELECTOR = ".card, .cardBox, .cardScalable, .portraitCard, .squareCard, .backdropCard, .listItem, [data-id], [data-itemid], [data-item-id]";
@@ -193,6 +194,11 @@
     return pieces.join(" ").slice(0, 1000);
   }
 
+  function getIconText(element) {
+    const icon = element.querySelector?.(".material-icons, .material-symbols-outlined, .material-symbols-rounded, i") || null;
+    return String(icon?.textContent || "").trim();
+  }
+
   function isPlayElement(element) {
     if (!element) {
       return false;
@@ -205,6 +211,8 @@
         "[role='button']",
         "[data-action]",
         "[data-command]",
+        ".itemAction",
+        ".paper-icon-button-light",
         ".btnPlay",
         ".btnResume",
         ".cardOverlayButton"
@@ -214,12 +222,17 @@
       return false;
     }
 
-    const text = getElementText(target);
+    const iconText = getIconText(target);
+    if (iconText && NON_PLAY_ACTION_RE.test(iconText)) {
+      return false;
+    }
+
+    const text = `${getElementText(target)} ${iconText}`;
     if (NON_PLAY_ACTION_RE.test(text)) {
       return false;
     }
 
-    return PLAY_TEXT_RE.test(text) || PLAY_CLASS_RE.test(text);
+    return PLAY_TEXT_RE.test(text) || PLAY_CLASS_RE.test(text) || PLAY_ICON_RE.test(text);
   }
 
   function readJson(value) {
