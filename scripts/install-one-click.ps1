@@ -1,6 +1,6 @@
 param(
   [string]$InstallDir = "$env:ProgramFiles\jellyfin-native-player-bridge",
-  [string]$JellyfinUrl = "http://localhost:8096/",
+  [string[]]$JellyfinUrl = @("http://localhost:8096/"),
   [switch]$NoLaunch,
   [switch]$LaunchEdge
 )
@@ -15,6 +15,7 @@ $CurrentPrincipal = New-Object Security.Principal.WindowsPrincipal($CurrentIdent
 
 function Relaunch-AsAdmin {
   $script = Join-Path $ScriptRoot "install-one-click.ps1"
+  $jellyfinUrlArg = @($JellyfinUrl | ForEach-Object { "`"$_`"" }) -join ","
   $args = @(
     "-NoProfile",
     "-ExecutionPolicy",
@@ -24,7 +25,7 @@ function Relaunch-AsAdmin {
     "-InstallDir",
     "`"$InstallDir`"",
     "-JellyfinUrl",
-    "`"$JellyfinUrl`""
+    $jellyfinUrlArg
   )
   if ($NoLaunch) {
     $args += "-NoLaunch"
@@ -126,12 +127,12 @@ Remove-OldEdgePolicy
 New-DesktopShortcut
 
 if ($LaunchEdge -and -not $NoLaunch) {
-  & (Join-Path $InstallDir "scripts\open-system-edge-with-extension.ps1") -Url $JellyfinUrl -CloseRunningEdge
+  & (Join-Path $InstallDir "scripts\open-system-edge-with-extension.ps1") -Url $($JellyfinUrl[0]) -CloseRunningEdge
 }
 
 Write-Host ""
 Write-Host "Installed Jellyfin Native Player Bridge."
 Write-Host "Install directory: $InstallDir"
-Write-Host "Jellyfin URL: $JellyfinUrl"
+Write-Host "Jellyfin URLs: $($JellyfinUrl -join ', ')"
 Write-Host "Edge launcher shortcut: Desktop\\Jellyfin Native Player Bridge.lnk"
 Write-Host "Edge was not launched automatically. Use -LaunchEdge if you want the installer to open it."

@@ -15,7 +15,9 @@ const STATE_FILE = path.join(DATA_DIR, "runtime-state.json");
 
 const DEFAULT_CONFIG = {
   host: "127.0.0.1",
+  hosts: ["127.0.0.1"],
   port: 45789,
+  serviceHosts: ["127.0.0.1"],
   browserSecret: "",
   playerPath: "",
   playerArgs: ["{url}"],
@@ -54,8 +56,8 @@ const LOG_LEVELS = {
 let configPath = path.join(APP_ROOT, "config", "config.json");
 let config = null;
 let logger = null;
-let server = null;
-let listenHost = null;
+let servers = [];
+let listenHosts = [];
 let listenPort = null;
 let cleanupTimer = null;
 
@@ -123,6 +125,62 @@ function resolveAppPath(value) {
   return path.isAbsolute(value) ? value : path.resolve(APP_ROOT, value);
 }
 
+function normalizeStringList(value, fallback = []) {
+  const rawValues = Array.isArray(value) ? value : [value];
+  const result = [];
+  for (const raw of rawValues) {
+    if (raw === undefined || raw === null) {
+      continue;
+    }
+    for (const part of String(raw).split(/[;,]/)) {
+      const trimmed = part.trim();
+      if (trimmed && !result.includes(trimmed)) {
+        result.push(trimmed);
+      }
+    }
+  }
+  if (result.length > 0) {
+    return result;
+  }
+  return fallback.slice();
+}
+
+function normalizeListenHosts(rawConfig, mergedConfig) {
+  const configuredHosts =
+    rawConfig && Object.prototype.hasOwnProperty.call(rawConfig, "hosts")
+      ? rawConfig.hosts
+      : rawConfig && Object.prototype.hasOwnProperty.call(rawConfig, "host")
+        ? rawConfig.host
+        : mergedConfig.hosts || mergedConfig.host;
+  const hosts = normalizeStringList(configuredHosts, DEFAULT_CONFIG.hosts);
+  if (hosts.length === 0) {
+    throw new Error("Invalid listener hosts");
+  }
+  return hosts;
+}
+
+function normalizeServiceHosts(rawConfig, mergedConfig) {
+  const configuredHosts =
+    rawConfig && Object.prototype.hasOwnProperty.call(rawConfig, "serviceHosts")
+      ? rawConfig.serviceHosts
+      : mergedConfig.serviceHosts || mergedConfig.hosts || mergedConfig.host;
+  return normalizeStringList(configuredHosts, DEFAULT_CONFIG.serviceHosts);
+}
+
+function sameStringList(left, right) {
+  const a = normalizeStringList(left);
+  const b = normalizeStringList(right);
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function hostForUrl(host) {
+  const value = String(host || "").trim();
+  if (value.includes(":") && !value.startsWith("[") && !value.endsWith("]")) {
+    return `[${value}]`;
+  }
+  return value;
+}
+
 function normalizeConfig(rawConfig) {
   const merged = deepMerge(DEFAULT_CONFIG, rawConfig || {});
   merged.port = Number(merged.port);
@@ -130,9 +188,9 @@ function normalizeConfig(rawConfig) {
     throw new Error(`Invalid listener port: ${merged.port}`);
   }
 
-  if (!merged.host || typeof merged.host !== "string") {
-    throw new Error("Invalid listener host");
-  }
+  merged.hosts = normalizeListenHosts(rawConfig || {}, merged);
+  merged.host = merged.hosts[0];
+  merged.serviceHosts = normalizeServiceHosts(rawConfig || {}, merged);
 
   if (!Array.isArray(merged.playerArgs)) {
     merged.playerArgs = ["{url}"];
@@ -253,7 +311,8 @@ class Logger {
 function writeRuntimeState() {
   writeJsonFile(STATE_FILE, {
     pid: process.pid,
-    host: listenHost,
+    host: listenHosts[0] || null,
+    hosts: listenHosts,
     port: listenPort,
     configPath,
     startedAt: new Date().toISOString()
@@ -830,6 +889,8 @@ async function handlePlay(payload) {
 function sanitizedConfig() {
   return {
     host: config.host,
+    hosts: config.hosts,
+    serviceHosts: config.serviceHosts,
     port: config.port,
     playerPath: config.playerPath,
     playerArgs: config.playerArgs,
@@ -858,7 +919,7 @@ function handleExtensionUpdateXml(req, res) {
     return;
   }
 
-  const codebase = `http://${listenHost}:${listenPort}/edge-extension/jellyfin-native-player-bridge.crx`;
+  const codebase = `http://${hostForUrl(config.serviceHosts[0] || listenHosts[0])}:${listenPort}/edge-extension/jellyfin-native-player-bridge.crx`;
   const body = `<?xml version="1.0" encoding="UTF-8"?>
 <gupdate xmlns="http://www.google.com/update2/response" protocol="2.0">
   <app appid="${xmlEscape(config.edgeExtension.id)}">
@@ -891,23 +952,24 @@ function resetCleanupTimer() {
 }
 
 function reloadConfig() {
-  const previousHost = config.host;
+  const previousHosts = config.hosts;
   const previousPort = config.port;
   const nextConfig = loadConfig();
   config = nextConfig;
   logger.configure(config);
   resetCleanupTimer();
-  const restartRequired = previousHost !== config.host || previousPort !== config.port;
+  const restartRequired = !sameStringList(previousHosts, config.hosts) || previousPort !== config.port;
   logger.info("Configuration reloaded", {
     restartRequired,
-    host: config.host,
+    hosts: config.hosts,
     port: config.port
   });
   return {
     ok: true,
     restartRequired,
     activeListener: {
-      host: listenHost,
+      host: listenHosts[0] || null,
+      hosts: listenHosts,
       port: listenPort
     },
     config: sanitizedConfig()
@@ -928,7 +990,8 @@ async function route(req, res) {
         name: "jellyfin-native-player-bridge",
         version: VERSION,
         pid: process.pid,
-        host: listenHost,
+        host: listenHosts[0] || null,
+        hosts: listenHosts,
         port: listenPort,
         startedAt: readJsonFile(STATE_FILE, {}).startedAt || null
       });
@@ -1021,27 +1084,37 @@ function start() {
   ensureDir(DATA_DIR);
   config = loadConfig();
   logger = new Logger(config);
-  listenHost = config.host;
+  listenHosts = config.hosts;
   listenPort = config.port;
   resetCleanupTimer();
 
-  server = http.createServer((req, res) => {
-    route(req, res);
-  });
-
-  server.on("clientError", (error, socket) => {
-    logger.warn("HTTP client error", { error: error.message });
-    socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
-  });
-
-  server.listen(listenPort, listenHost, () => {
-    writeRuntimeState();
-    logger.info("Listener started", {
-      version: VERSION,
-      host: listenHost,
-      port: listenPort,
-      configPath
+  servers = listenHosts.map((host) => {
+    const instance = http.createServer((req, res) => {
+      route(req, res);
     });
+
+    instance.on("clientError", (error, socket) => {
+      logger.warn("HTTP client error", { host, error: error.message });
+      socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+    });
+
+    instance.on("error", (error) => {
+      logger.error("Listener failed", { host, port: listenPort, error: error.message });
+      shutdown(1);
+    });
+
+    instance.listen(listenPort, host, () => {
+      writeRuntimeState();
+      logger.info("Listener started", {
+        version: VERSION,
+        host,
+        hosts: listenHosts,
+        port: listenPort,
+        configPath
+      });
+    });
+
+    return instance;
   });
 }
 
@@ -1054,12 +1127,40 @@ function shutdown(exitCode) {
     removeRuntimeState();
     process.exit(exitCode);
   };
-  if (server) {
-    server.close(() => finish());
-    setTimeout(finish, 3000).unref();
-  } else {
+  const activeServers = servers.slice();
+  servers = [];
+  if (activeServers.length === 0) {
     finish();
+    return;
   }
+
+  let remaining = activeServers.length;
+  let finished = false;
+  const finishOnce = () => {
+    if (finished) {
+      return;
+    }
+    finished = true;
+    finish();
+  };
+
+  for (const activeServer of activeServers) {
+    try {
+      activeServer.close(() => {
+        remaining -= 1;
+        if (remaining <= 0) {
+          finishOnce();
+        }
+      });
+    } catch {
+      remaining -= 1;
+    }
+  }
+  if (remaining <= 0) {
+    finishOnce();
+    return;
+  }
+  setTimeout(finishOnce, 3000).unref();
 }
 
 process.on("SIGINT", () => {

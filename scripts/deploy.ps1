@@ -1,9 +1,10 @@
 param(
   [string]$InstallDir = "$env:ProgramFiles\jellyfin-native-player-bridge",
-  [string]$HostName = "127.0.0.1",
+  [string[]]$HostName = @("127.0.0.1"),
+  [string[]]$ServiceHost = @(),
   [int]$Port = 45789,
   [string]$PlayerPath = "",
-  [string]$JellyfinUrl = "http://localhost:8096/",
+  [string[]]$JellyfinUrl = @("http://localhost:8096/"),
   [switch]$RegisterStartupTask
 )
 
@@ -70,6 +71,69 @@ function Get-JellyfinMatchPattern {
   }
 }
 
+function Normalize-StringList {
+  param(
+    [object]$Value,
+    [string[]]$Fallback = @()
+  )
+
+  $result = New-Object System.Collections.Generic.List[string]
+  foreach ($raw in @($Value)) {
+    if ($null -eq $raw) {
+      continue
+    }
+    foreach ($part in ([string]$raw -split '[;,]')) {
+      $trimmed = $part.Trim()
+      if ($trimmed -and -not $result.Contains($trimmed)) {
+        $result.Add($trimmed)
+      }
+    }
+  }
+  if ($result.Count -gt 0) {
+    return [string[]]$result.ToArray()
+  }
+  return [string[]]$Fallback
+}
+
+function ConvertTo-JsonStringArray {
+  param([string[]]$Values)
+
+  $items = @($Values | ForEach-Object { [string]$_ | ConvertTo-Json -Compress })
+  "[$($items -join ',')]"
+}
+
+function Get-HostForUrl {
+  param([string]$HostValue)
+
+  $value = ([string]$HostValue).Trim()
+  if ($value.Contains(":") -and -not $value.StartsWith("[") -and -not $value.EndsWith("]")) {
+    return "[$value]"
+  }
+  return $value
+}
+
+function Get-ServiceHostsFromListenHosts {
+  param([string[]]$ListenHosts)
+
+  $mapped = foreach ($hostValue in $ListenHosts) {
+    switch ($hostValue) {
+      "0.0.0.0" { "127.0.0.1"; break }
+      "::" { "::1"; break }
+      default { $hostValue }
+    }
+  }
+  Normalize-StringList -Value $mapped -Fallback @("127.0.0.1")
+}
+
+function Get-UserscriptUrl {
+  param(
+    [string]$ServiceHostValue,
+    [int]$ServicePort
+  )
+
+  "http://$(Get-HostForUrl -HostValue $ServiceHostValue)`:$ServicePort/userscript/jellyfin-native-player-bridge.user.js"
+}
+
 function Copy-App {
   param([string]$From, [string]$To)
 
@@ -85,7 +149,10 @@ function Write-ConfigFiles {
   param(
     [string]$Root,
     [string]$Player,
-    [string]$Secret
+    [string]$Secret,
+    [string[]]$ListenHosts,
+    [string[]]$BrowserServiceHosts,
+    [string[]]$JellyfinUrls
   )
 
   $configDir = Join-Path $Root "config"
@@ -104,7 +171,9 @@ function Write-ConfigFiles {
   }
 
   $config = [ordered]@{
-    host = $HostName
+    host = $ListenHosts[0]
+    hosts = @($ListenHosts)
+    serviceHosts = @($BrowserServiceHosts)
     port = $Port
     browserSecret = $Secret
     playerPath = $Player
@@ -114,6 +183,7 @@ function Write-ConfigFiles {
       preferStaticUrl = $true
     }
     jellyfin = [ordered]@{
+      servers = @($JellyfinUrls)
       chooseFirstPlayableForFolders = $true
       requestPlaybackInfo = $true
       reportPlaybackStart = $true
@@ -131,9 +201,18 @@ function Write-ConfigFiles {
 
   $config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $configPath -Encoding UTF8
 
+  $serviceHostsJson = ConvertTo-JsonStringArray -Values $BrowserServiceHosts
+  $jellyfinMatches = (@($JellyfinUrls | ForEach-Object { Get-JellyfinMatchPattern -Url $_ }) | Select-Object -Unique) -join "`n// @match        "
+  $serviceConnects = (@($BrowserServiceHosts + @("127.0.0.1", "localhost") | ForEach-Object {
+    $connectHost = ([string]$_).Trim().TrimStart("[").TrimEnd("]")
+    if ($connectHost) { $connectHost }
+  }) | Select-Object -Unique) -join "`n// @connect      "
+  $userscriptUrl = Get-UserscriptUrl -ServiceHostValue $BrowserServiceHosts[0] -ServicePort $Port
+
   $extensionConfig = @"
 globalThis.JEP_DEFAULT_CONFIG = Object.freeze({
-  serviceHost: "$HostName",
+  serviceHost: "$($BrowserServiceHosts[0])",
+  serviceHosts: $serviceHostsJson,
   servicePort: $Port,
   serviceToken: "$Secret",
   notifyOnSuccess: false
@@ -144,20 +223,25 @@ globalThis.JEP_DEFAULT_CONFIG = Object.freeze({
   $userscriptPath = Join-Path $Root "userscript\jellyfin-native-player-bridge.user.js"
   if (Test-Path -LiteralPath $userscriptPath) {
     $userscript = Get-Content -LiteralPath $userscriptPath -Raw
-    $userscript = $userscript.Replace("__JNPB_SERVICE_HOST__", $HostName)
+    $userscript = $userscript.Replace('"__JNPB_SERVICE_HOSTS__"', $serviceHostsJson)
+    $userscript = $userscript.Replace("__JNPB_SERVICE_HOST__", $BrowserServiceHosts[0])
     $userscript = $userscript.Replace("__JNPB_SERVICE_PORT__", [string]$Port)
     $userscript = $userscript.Replace("__JNPB_SERVICE_TOKEN__", $Secret)
-    $userscript = $userscript.Replace("__JNPB_JELLYFIN_MATCH__", (Get-JellyfinMatchPattern -Url $JellyfinUrl))
-    $userscript = $userscript.Replace("__JNPB_USERSCRIPT_URL__", "http://$HostName`:$Port/userscript/jellyfin-native-player-bridge.user.js")
+    $userscript = $userscript.Replace("__JNPB_JELLYFIN_MATCH__", $jellyfinMatches)
+    $userscript = $userscript.Replace("__JNPB_SERVICE_CONNECTS__", $serviceConnects)
+    $userscript = $userscript.Replace("__JNPB_USERSCRIPT_URL__", $userscriptUrl)
     Set-Content -LiteralPath $userscriptPath -Value $userscript -Encoding UTF8
   }
 }
 
 $resolvedPlayer = Find-Player -ExplicitPath $PlayerPath
 $secret = New-Secret
+$listenHosts = Normalize-StringList -Value $HostName -Fallback @("127.0.0.1")
+$browserServiceHosts = Normalize-StringList -Value $ServiceHost -Fallback (Get-ServiceHostsFromListenHosts -ListenHosts $listenHosts)
+$jellyfinUrls = Normalize-StringList -Value $JellyfinUrl -Fallback @("http://localhost:8096/")
 
 Copy-App -From $SourceRoot -To $InstallDir
-Write-ConfigFiles -Root $InstallDir -Player $resolvedPlayer -Secret $secret
+Write-ConfigFiles -Root $InstallDir -Player $resolvedPlayer -Secret $secret -ListenHosts $listenHosts -BrowserServiceHosts $browserServiceHosts -JellyfinUrls $jellyfinUrls
 
 if ($RegisterStartupTask) {
   & (Join-Path $InstallDir "scripts\register-startup-task.ps1")
@@ -171,5 +255,11 @@ if ($resolvedPlayer) {
 }
 Write-Host "Extension path: $InstallDir\extension"
 Write-Host "Userscript path: $InstallDir\userscript\jellyfin-native-player-bridge.user.js"
-Write-Host "Userscript URL: http://$HostName`:$Port/userscript/jellyfin-native-player-bridge.user.js"
+Write-Host "Listener hosts: $($listenHosts -join ', ')"
+Write-Host "Browser service hosts: $($browserServiceHosts -join ', ')"
+Write-Host "Jellyfin URLs: $($jellyfinUrls -join ', ')"
+Write-Host "Userscript URLs:"
+foreach ($serviceHostValue in $browserServiceHosts) {
+  Write-Host "  $(Get-UserscriptUrl -ServiceHostValue $serviceHostValue -ServicePort $Port)"
+}
 Write-Host "Startup task: $(if ($RegisterStartupTask) { 'registered' } else { 'not registered' })"

@@ -4,7 +4,8 @@ New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
 
 $running = Test-JepService
 if ($running) {
-  Write-Host "Jellyfin Native Player Bridge is already running on port $($running.port), PID $($running.pid)."
+  $hosts = if ($running.hosts) { ($running.hosts -join ", ") } else { $running.host }
+  Write-Host "Jellyfin Native Player Bridge is already running on hosts $hosts, port $($running.port), PID $($running.pid)."
   exit 0
 }
 
@@ -24,7 +25,8 @@ Start-Sleep -Milliseconds 900
 
 $started = Test-JepService
 if ($started) {
-  Write-Host "Started Jellyfin Native Player Bridge on port $($started.port), PID $($started.pid)."
+  $hosts = if ($started.hosts) { ($started.hosts -join ", ") } else { $started.host }
+  Write-Host "Started Jellyfin Native Player Bridge on hosts $hosts, port $($started.port), PID $($started.pid)."
   exit 0
 }
 

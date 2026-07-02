@@ -18,11 +18,46 @@ function Read-JepConfig {
   Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
 }
 
+function Get-JepStringList {
+  param(
+    [object]$Value,
+    [string[]]$Fallback = @()
+  )
+
+  $result = New-Object System.Collections.Generic.List[string]
+  foreach ($raw in @($Value)) {
+    if ($null -eq $raw) {
+      continue
+    }
+    foreach ($part in ([string]$raw -split '[;,]')) {
+      $trimmed = $part.Trim()
+      if ($trimmed -and -not $result.Contains($trimmed)) {
+        $result.Add($trimmed)
+      }
+    }
+  }
+  if ($result.Count -gt 0) {
+    return [string[]]$result.ToArray()
+  }
+  return [string[]]$Fallback
+}
+
+function Get-JepUrlHost {
+  param([string]$HostName)
+
+  $value = ([string]$HostName).Trim()
+  if ($value.Contains(":") -and -not $value.StartsWith("[") -and -not $value.EndsWith("]")) {
+    return "[$value]"
+  }
+  return $value
+}
+
 function Get-JepBaseUrl {
   $config = Read-JepConfig
-  $hostName = if ($config.host) { [string]$config.host } else { "127.0.0.1" }
+  $hosts = Get-JepStringList -Value $config.serviceHosts -Fallback (Get-JepStringList -Value $config.hosts -Fallback @([string]$config.host, "127.0.0.1"))
+  $hostName = if ($hosts.Count -gt 0) { $hosts[0] } else { "127.0.0.1" }
   $port = if ($config.port) { [int]$config.port } else { 45789 }
-  "http://$hostName`:$port"
+  "http://$(Get-JepUrlHost -HostName $hostName)`:$port"
 }
 
 function Get-JepHeaders {

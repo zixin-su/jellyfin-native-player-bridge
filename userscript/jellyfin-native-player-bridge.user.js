@@ -1,15 +1,14 @@
 // ==UserScript==
 // @name         Jellyfin Native Player Bridge
 // @namespace    https://github.com/zixin-su/jellyfin-native-player-bridge
-// @version      0.1.2
+// @version      0.1.3
 // @description  Intercept Jellyfin Web play buttons and open media through a local native player bridge.
 // @author       zixin-su
 // @match        __JNPB_JELLYFIN_MATCH__
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
 // @grant        GM_notification
-// @connect      127.0.0.1
-// @connect      localhost
+// @connect      __JNPB_SERVICE_CONNECTS__
 // @downloadURL  __JNPB_USERSCRIPT_URL__
 // @updateURL    __JNPB_USERSCRIPT_URL__
 // ==/UserScript==
@@ -18,15 +17,42 @@
   "use strict";
 
   const CONFIG = {
+    serviceHosts: "__JNPB_SERVICE_HOSTS__",
     serviceHost: "__JNPB_SERVICE_HOST__",
     servicePort: Number("__JNPB_SERVICE_PORT__") || 45789,
     serviceToken: "__JNPB_SERVICE_TOKEN__",
     source: "tampermonkey"
   };
 
-  if (!CONFIG.serviceHost || CONFIG.serviceHost.startsWith("__JNPB_")) {
-    CONFIG.serviceHost = "127.0.0.1";
+  function normalizeStringList(value) {
+    const rawValues = Array.isArray(value) ? value : [value];
+    const result = [];
+    for (const raw of rawValues) {
+      if (raw === undefined || raw === null) {
+        continue;
+      }
+      const text = String(raw);
+      if (text.startsWith("__JNPB_")) {
+        continue;
+      }
+      for (const part of text.split(/[;,]/)) {
+        const trimmed = part.trim();
+        if (trimmed && !result.includes(trimmed)) {
+          result.push(trimmed);
+        }
+      }
+    }
+    return result;
   }
+
+  CONFIG.serviceHosts = normalizeStringList(CONFIG.serviceHosts);
+  CONFIG.serviceHosts.push(...normalizeStringList(CONFIG.serviceHost));
+  CONFIG.serviceHosts = [...new Set(CONFIG.serviceHosts)];
+  if (CONFIG.serviceHosts.length === 0) {
+    CONFIG.serviceHosts = ["127.0.0.1"];
+  }
+  CONFIG.activeServiceHost = CONFIG.serviceHosts[0];
+  CONFIG.serviceHost = CONFIG.activeServiceHost;
   if (!CONFIG.serviceToken || CONFIG.serviceToken.startsWith("__JNPB_")) {
     CONFIG.serviceToken = "";
   }
@@ -469,22 +495,23 @@
     setTimeout(() => toast.remove(), 2800);
   }
 
-  function serviceBaseUrl() {
-    return `http://${CONFIG.serviceHost}:${CONFIG.servicePort}`;
+  function hostForUrl(host) {
+    const value = String(host || "").trim();
+    if (value.includes(":") && !value.startsWith("[") && !value.endsWith("]")) {
+      return `[${value}]`;
+    }
+    return value;
   }
 
-  function callService(path, body) {
-    const headers = {
-      "Content-Type": "application/json"
-    };
-    if (CONFIG.serviceToken) {
-      headers["X-JEP-Token"] = CONFIG.serviceToken;
-    }
+  function serviceBaseUrl(host = CONFIG.activeServiceHost) {
+    return `http://${hostForUrl(host)}:${CONFIG.servicePort}`;
+  }
 
+  function requestService(baseUrl, path, headers, body) {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method: "POST",
-        url: `${serviceBaseUrl()}${path}`,
+        url: `${baseUrl}${path}`,
         headers,
         data: JSON.stringify(body || {}),
         timeout: 12000,
@@ -511,6 +538,33 @@
         }
       });
     });
+  }
+
+  async function callService(path, body) {
+    const headers = {
+      "Content-Type": "application/json"
+    };
+    if (CONFIG.serviceToken) {
+      headers["X-JEP-Token"] = CONFIG.serviceToken;
+    }
+
+    const hosts = [
+      CONFIG.activeServiceHost,
+      ...CONFIG.serviceHosts
+    ].filter((host, index, list) => host && list.indexOf(host) === index);
+
+    let lastError = null;
+    for (const host of hosts) {
+      try {
+        const result = await requestService(serviceBaseUrl(host), path, headers, body);
+        CONFIG.activeServiceHost = host;
+        CONFIG.serviceHost = host;
+        return result;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error("Local player bridge request failed");
   }
 
   async function interceptPlay(event) {

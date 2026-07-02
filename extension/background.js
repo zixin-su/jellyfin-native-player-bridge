@@ -10,6 +10,7 @@ const browserApi = globalThis.browser || globalThis.chrome;
 
 const DEFAULTS = {
   serviceHost: "127.0.0.1",
+  serviceHosts: [],
   servicePort: 45789,
   serviceToken: "",
   notifyOnSuccess: false,
@@ -30,17 +31,51 @@ function storageSet(value) {
 
 async function getSettings() {
   const stored = await storageGet(Object.keys(DEFAULTS));
-  return {
+  const settings = {
     ...DEFAULTS,
     ...stored,
     servicePort: Number(stored.servicePort || DEFAULTS.servicePort)
   };
+  settings.serviceHosts = normalizeServiceHosts(settings);
+  settings.serviceHost = settings.serviceHosts[0] || settings.serviceHost || DEFAULTS.serviceHost;
+  return settings;
 }
 
-function serviceBaseUrl(settings) {
-  const host = String(settings.serviceHost || DEFAULTS.serviceHost).trim();
+function normalizeStringList(value) {
+  const rawValues = Array.isArray(value) ? value : [value];
+  const result = [];
+  for (const raw of rawValues) {
+    if (raw === undefined || raw === null) {
+      continue;
+    }
+    for (const part of String(raw).split(/[;,]/)) {
+      const trimmed = part.trim();
+      if (trimmed && !result.includes(trimmed)) {
+        result.push(trimmed);
+      }
+    }
+  }
+  return result;
+}
+
+function normalizeServiceHosts(settings) {
+  const hosts = normalizeStringList(settings.serviceHosts);
+  hosts.push(...normalizeStringList(settings.serviceHost || DEFAULTS.serviceHost));
+  const unique = [...new Set(hosts)];
+  return unique.length > 0 ? unique : [DEFAULTS.serviceHost];
+}
+
+function hostForUrl(host) {
+  const value = String(host || "").trim();
+  if (value.includes(":") && !value.startsWith("[") && !value.endsWith("]")) {
+    return `[${value}]`;
+  }
+  return value;
+}
+
+function serviceBaseUrl(settings, host) {
   const port = Number(settings.servicePort || DEFAULTS.servicePort);
-  return `http://${host}:${port}`;
+  return `http://${hostForUrl(host)}:${port}`;
 }
 
 async function notify(title, message) {
@@ -70,24 +105,32 @@ async function callService(path, options = {}) {
     headers["X-JEP-Token"] = settings.serviceToken;
   }
 
-  const response = await fetch(`${serviceBaseUrl(settings)}${path}`, {
-    method: options.method || "GET",
-    headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body)
-  });
-  const text = await response.text();
-  let body = {};
-  if (text) {
+  let lastError = null;
+  for (const host of settings.serviceHosts) {
     try {
-      body = JSON.parse(text);
-    } catch {
-      body = { raw: text };
+      const response = await fetch(`${serviceBaseUrl(settings, host)}${path}`, {
+        method: options.method || "GET",
+        headers,
+        body: options.body === undefined ? undefined : JSON.stringify(options.body)
+      });
+      const text = await response.text();
+      let body = {};
+      if (text) {
+        try {
+          body = JSON.parse(text);
+        } catch {
+          body = { raw: text };
+        }
+      }
+      if (!response.ok || body.ok === false) {
+        throw new Error(body.error || `Service returned HTTP ${response.status}`);
+      }
+      return body;
+    } catch (error) {
+      lastError = error;
     }
   }
-  if (!response.ok || body.ok === false) {
-    throw new Error(body.error || `Service returned HTTP ${response.status}`);
-  }
-  return body;
+  throw lastError || new Error("Local player bridge request failed");
 }
 
 async function handlePlay(payload, sender) {

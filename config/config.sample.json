@@ -1,5 +1,11 @@
 {
   "host": "127.0.0.1",
+  "hosts": [
+    "127.0.0.1"
+  ],
+  "serviceHosts": [
+    "127.0.0.1"
+  ],
   "port": 45789,
   "browserSecret": "",
   "playerPath": "",
@@ -11,6 +17,9 @@
     "preferStaticUrl": true
   },
   "jellyfin": {
+    "servers": [
+      "http://localhost:8096/"
+    ],
     "chooseFirstPlayableForFolders": true,
     "requestPlaybackInfo": true,
     "reportPlaybackStart": true,

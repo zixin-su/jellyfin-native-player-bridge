@@ -48,7 +48,9 @@ Tampermonkey 用户脚本方案见 [docs/tampermonkey-userscript.md](docs/tamper
 
 常用字段：
 
-- `host`: 监听地址，默认 `127.0.0.1`。
+- `host`: 兼容旧配置的单个监听地址，默认 `127.0.0.1`。
+- `hosts`: 多个监听地址，优先于 `host`。
+- `serviceHosts`: 浏览器脚本访问本地服务时尝试的地址列表。
 - `port`: 监听端口，默认 `45789`。
 - `browserSecret`: 浏览器扩展访问本地服务的密钥，部署时自动生成。
 - `playerPath`: 本地播放器 exe 路径。
