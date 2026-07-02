@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jellyfin Native Player Bridge</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="shell">
+    <h1>Jellyfin Native Player Bridge</h1>
+    <form id="settingsForm">
+      <label>
+        <span>监听地址</span>
+        <input id="serviceHost" name="serviceHost" autocomplete="off" placeholder="127.0.0.1">
+      </label>
+      <label>
+        <span>监听端口</span>
+        <input id="servicePort" name="servicePort" type="number" min="1" max="65535" placeholder="45789">
+      </label>
+      <label>
+        <span>访问密钥</span>
+        <input id="serviceToken" name="serviceToken" type="password" autocomplete="off">
+      </label>
+      <label class="check">
+        <input id="notifyOnSuccess" name="notifyOnSuccess" type="checkbox">
+        <span>成功接管播放后显示系统通知</span>
+      </label>
+      <div class="actions">
+        <button type="submit">保存</button>
+        <button id="testButton" type="button">测试连接</button>
+        <button id="reloadButton" type="button">重载服务配置</button>
+      </div>
+    </form>
+    <p id="status" role="status"></p>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

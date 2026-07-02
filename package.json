@@ -1,0 +1,21 @@
+{
+  "name": "jellyfin-native-player-bridge",
+  "version": "0.1.0",
+  "description": "Local listener and Edge extension that bridge Jellyfin Web playback to a native media player.",
+  "main": "service/src/index.js",
+  "scripts": {
+    "start": "runtime/node.exe service/src/index.js --config config/config.json",
+    "check": "runtime/node.exe --check service/src/index.js && runtime/node.exe --check extension/background.js && runtime/node.exe --check extension/content.js && runtime/node.exe --check extension/options.js && runtime/node.exe --check extension/popup.js"
+  },
+  "keywords": [
+    "jellyfin",
+    "edge-extension",
+    "external-player",
+    "native-player-bridge"
+  ],
+  "author": "zixin-su",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}

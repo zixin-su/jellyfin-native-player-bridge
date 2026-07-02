@@ -1,0 +1,8 @@
+node_modules/
+logs/
+data/
+config/config.json
+config/runtime.json
+extension/default-config.js
+*.log
+*.pid

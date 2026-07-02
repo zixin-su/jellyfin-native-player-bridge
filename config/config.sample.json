@@ -1,0 +1,25 @@
+{
+  "host": "127.0.0.1",
+  "port": 45789,
+  "browserSecret": "",
+  "playerPath": "",
+  "playerArgs": [
+    "{url}"
+  ],
+  "stream": {
+    "maxStreamingBitrate": 140000000,
+    "preferStaticUrl": true
+  },
+  "jellyfin": {
+    "chooseFirstPlayableForFolders": true,
+    "requestPlaybackInfo": true,
+    "reportPlaybackStart": false,
+    "apiTimeoutMs": 12000
+  },
+  "logging": {
+    "directory": "logs",
+    "level": "info",
+    "retentionDays": 14,
+    "cleanupIntervalHours": 12
+  }
+}
